@@ -40,6 +40,10 @@ const FUNCTION_NODE_TYPES = new Set([
   // Ruby
   'method',           // def foo
   'singleton_method', // def self.foo
+  // Kotlin (function_declaration already included above via JS/TS)
+  'anonymous_function',
+  'lambda_literal',
+  // PHP — no additional node types needed
   // Swift
   'init_declaration',
   'deinit_declaration',
@@ -409,6 +413,22 @@ const BUILT_IN_NAMES = new Set([
   'open', 'read', 'write', 'close', 'append', 'extend', 'update',
   'super', 'type', 'isinstance', 'issubclass', 'getattr', 'setattr', 'hasattr',
   'enumerate', 'zip', 'sorted', 'reversed', 'min', 'max', 'sum', 'abs',
+  // Kotlin stdlib (IMPORTANT: keep in sync with parse-worker.ts BUILT_IN_NAMES)
+  'println', 'print', 'readLine', 'require', 'requireNotNull', 'check', 'assert', 'lazy', 'error',
+  'listOf', 'mapOf', 'setOf', 'mutableListOf', 'mutableMapOf', 'mutableSetOf',
+  'arrayOf', 'sequenceOf', 'also', 'apply', 'run', 'with', 'takeIf', 'takeUnless',
+  'TODO', 'buildString', 'buildList', 'buildMap', 'buildSet',
+  'repeat', 'synchronized',
+  // Kotlin coroutine builders & scope functions
+  'launch', 'async', 'runBlocking', 'withContext', 'coroutineScope',
+  'supervisorScope', 'delay',
+  // Kotlin Flow operators
+  'flow', 'flowOf', 'collect', 'emit', 'onEach', 'catch',
+  'buffer', 'conflate', 'distinctUntilChanged',
+  'flatMapLatest', 'flatMapMerge', 'combine',
+  'stateIn', 'shareIn', 'launchIn',
+  // Kotlin infix stdlib functions
+  'to', 'until', 'downTo', 'step',
   // C/C++ standard library and common kernel helpers
   'printf', 'fprintf', 'sprintf', 'snprintf', 'vprintf', 'vfprintf', 'vsprintf', 'vsnprintf',
   'scanf', 'fscanf', 'sscanf',

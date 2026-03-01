@@ -8,6 +8,7 @@ import CPP from 'tree-sitter-cpp';
 import CSharp from 'tree-sitter-c-sharp';
 import Go from 'tree-sitter-go';
 import Rust from 'tree-sitter-rust';
+import Kotlin from 'tree-sitter-kotlin';
 import PHP from 'tree-sitter-php';
 import Ruby from 'tree-sitter-ruby';
 import { createRequire } from 'node:module';
@@ -31,6 +32,7 @@ const languageMap: Record<string, any> = {
   [SupportedLanguages.CSharp]: CSharp,
   [SupportedLanguages.Go]: Go,
   [SupportedLanguages.Rust]: Rust,
+  [SupportedLanguages.Kotlin]: Kotlin,
   [SupportedLanguages.PHP]: PHP.php_only,
   [SupportedLanguages.Ruby]: Ruby,
   ...(Swift ? { [SupportedLanguages.Swift]: Swift } : {}),
