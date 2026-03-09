@@ -215,14 +215,28 @@ const isNodeExported = (node: any, name: string, language: string): boolean => {
       const first = name[0];
       return first === first.toUpperCase() && first !== first.toLowerCase();
 
-    case 'rust':
+    case 'rust': {
+      // In Rust AST, `visibility_modifier` is a SIBLING of the name node (identifier/type_identifier)
+      // within the declaration node (function_item, struct_item, impl_item, etc.).
+      // Walking up parents from the name node will never hit `visibility_modifier` directly.
+      // Fix: walk up to the declaration node, then check its children for visibility_modifier.
+      const RUST_DECL_TYPES = new Set([
+        'function_item', 'struct_item', 'enum_item', 'trait_item', 'impl_item',
+        'type_item', 'const_item', 'static_item', 'mod_item', 'use_declaration',
+        'associated_type', 'function_signature_item',
+      ]);
       while (current) {
-        if (current.type === 'visibility_modifier') {
-          if (current.text?.includes('pub')) return true;
+        if (RUST_DECL_TYPES.has(current.type)) {
+          for (let i = 0; i < current.childCount; i++) {
+            const child = current.child(i);
+            if (child?.type === 'visibility_modifier' && child.text?.startsWith('pub')) return true;
+          }
+          return false;
         }
         current = current.parent;
       }
       return false;
+    }
 
     // Kotlin: Default visibility is public (unlike Java)
     // visibility_modifier is inside modifiers, a sibling of the name node within the declaration
