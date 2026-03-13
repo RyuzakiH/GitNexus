@@ -39,6 +39,7 @@ import { detectFrameworkFromAST } from '../framework-detection.js';
 import { generateId } from '../../../lib/utils.js';
 import { extractNamedBindings } from '../named-binding-extraction.js';
 import { appendKotlinWildcard } from '../resolvers/index.js';
+import { routeRubyCall } from '../ruby-call-routing.js';
 
 // ============================================================================
 // Types for serializable results
@@ -864,80 +865,50 @@ const processFileGroup = (
           // Ruby: route special calls to imports, heritage, or properties
           if (language === SupportedLanguages.Ruby) {
             const callNode = captureMap['call'];
+            const routed = routeRubyCall(calledName, callNode);
 
-            // require/require_relative → import extraction
-            if (calledName === 'require' || calledName === 'require_relative') {
-              const argList = callNode.childForFieldName?.('arguments');
-              const stringNode = argList?.children?.find((c: any) => c.type === 'string');
-              const contentNode = stringNode?.children?.find((c: any) => c.type === 'string_content');
-              if (contentNode) {
-                let importPath = contentNode.text;
-                // require_relative always resolves relative to current file
-                if (calledName === 'require_relative' && !importPath.startsWith('.')) {
-                  importPath = './' + importPath;
-                }
+            switch (routed.kind) {
+              case 'skip':
+                continue;
+
+              case 'import':
                 result.imports.push({
                   filePath: file.path,
-                  rawImportPath: importPath,
-                  language: language,
+                  rawImportPath: routed.importPath,
+                  language,
                 });
-              }
-              continue;
-            }
+                continue;
 
-            // include/extend/prepend → heritage (mixin)
-            if (calledName === 'include' || calledName === 'extend' || calledName === 'prepend') {
-              let enclosingClass: string | null = null;
-              let current = callNode.parent;
-              while (current) {
-                if (current.type === 'class' || current.type === 'module') {
-                  const nameNode = current.childForFieldName?.('name');
-                  if (nameNode) {
-                    enclosingClass = nameNode.text;
-                    break;
-                  }
+              case 'heritage':
+                for (const item of routed.items) {
+                  result.heritage.push({
+                    filePath: file.path,
+                    className: item.enclosingClass,
+                    parentName: item.mixinName,
+                    kind: 'trait-impl',
+                  });
                 }
-                current = current.parent;
-              }
-              if (enclosingClass) {
-                const argList = callNode.childForFieldName?.('arguments');
-                for (const arg of (argList?.children ?? [])) {
-                  if (arg.type === 'constant' || arg.type === 'scope_resolution') {
-                    result.heritage.push({
-                      filePath: file.path,
-                      className: enclosingClass,
-                      parentName: arg.text,
-                      kind: 'trait-impl',
-                    });
-                  }
-                }
-              }
-              continue;
-            }
+                continue;
 
-            // attr_accessor/attr_reader/attr_writer → property definitions
-            if (calledName === 'attr_accessor' || calledName === 'attr_reader' || calledName === 'attr_writer') {
-              const argList = callNode.childForFieldName?.('arguments');
-              for (const arg of (argList?.children ?? [])) {
-                if (arg.type === 'simple_symbol') {
-                  const propName = arg.text.replace(/^:/, '');
-                  const nodeId = generateId('Property', `${file.path}:${propName}`);
+              case 'properties':
+                for (const item of routed.items) {
+                  const nodeId = generateId('Property', `${file.path}:${item.propName}`);
                   result.nodes.push({
                     id: nodeId,
                     label: 'Property',
                     properties: {
-                      name: propName,
+                      name: item.propName,
                       filePath: file.path,
-                      startLine: arg.startPosition.row,
-                      endLine: arg.endPosition.row,
-                      language: language,
+                      startLine: item.startLine,
+                      endLine: item.endLine,
+                      language,
                       isExported: true,
-                      description: calledName,
+                      description: item.accessorType,
                     },
                   });
                   result.symbols.push({
                     filePath: file.path,
-                    name: propName,
+                    name: item.propName,
                     nodeId,
                     type: 'Property',
                   });
@@ -952,17 +923,27 @@ const processFileGroup = (
                     reason: '',
                   });
                 }
-              }
-              continue;
-            }
+                continue;
 
-            // Regular Ruby call (skip built-ins)
-            if (!isBuiltInOrNoise(calledName)) {
-              const sourceId = findEnclosingFunctionId(callNode, file.path)
-                || generateId('File', file.path);
-              result.calls.push({ filePath: file.path, calledName, sourceId });
+              case 'call':
+                if (!isBuiltInOrNoise(calledName)) {
+                  const sourceId = findEnclosingFunctionId(callNode, file.path)
+                    || generateId('File', file.path);
+                  const callForm = inferCallForm(callNode, callNameNode);
+                  const receiverName = callForm === 'member' ? extractReceiverName(callNameNode) : undefined;
+                  const receiverTypeName = receiverName ? lookupTypeEnv(typeEnv, receiverName, callNode) : undefined;
+                  result.calls.push({
+                    filePath: file.path,
+                    calledName,
+                    sourceId,
+                    argCount: countCallArguments(callNode),
+                    ...(callForm !== undefined ? { callForm } : {}),
+                    ...(receiverName !== undefined ? { receiverName } : {}),
+                    ...(receiverTypeName !== undefined ? { receiverTypeName } : {}),
+                  });
+                }
+                continue;
             }
-            continue;
           }
 
           if (!isBuiltInOrNoise(calledName)) {

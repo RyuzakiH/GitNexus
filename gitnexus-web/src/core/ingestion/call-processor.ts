@@ -6,6 +6,8 @@ import { loadParser, loadLanguage } from '../tree-sitter/parser-loader';
 import { LANGUAGE_QUERIES } from './tree-sitter-queries';
 import { generateId } from '../../lib/utils';
 import { getLanguageFromFilename } from './utils';
+import { SupportedLanguages } from '../../config/supported-languages';
+import { routeRubyCall } from './ruby-call-routing';
 
 /**
  * Node types that represent function/method definitions across languages.
@@ -200,63 +202,46 @@ export const processCalls = async (
       const calledName = nameNode.text;
 
       // Ruby: route special calls to heritage or properties (imports handled by import-processor)
-      if (language === 'ruby') {
+      if (language === SupportedLanguages.Ruby) {
         const callNode = captureMap['call'];
+        const routed = routeRubyCall(calledName, callNode);
 
-        // require/require_relative → already handled by import-processor, skip
-        if (calledName === 'require' || calledName === 'require_relative') return;
+        switch (routed.kind) {
+          case 'skip':
+          case 'import': // handled by import-processor
+            return;
 
-        // include/extend/prepend → heritage (mixin) relationships
-        if (calledName === 'include' || calledName === 'extend' || calledName === 'prepend') {
-          let enclosingClass: string | null = null;
-          let current = callNode.parent;
-          while (current) {
-            if (current.type === 'class' || current.type === 'module') {
-              const cn = current.childForFieldName?.('name');
-              if (cn) { enclosingClass = cn.text; break; }
-            }
-            current = current.parent;
-          }
-          if (enclosingClass) {
-            const argList = callNode.childForFieldName?.('arguments');
-            for (const arg of (argList?.children ?? [])) {
-              if (arg.type === 'constant' || arg.type === 'scope_resolution') {
-                const mixinName = arg.text;
-                const childId = symbolTable.lookupExact(file.path, enclosingClass) ||
-                                symbolTable.lookupFuzzy(enclosingClass)[0]?.nodeId ||
-                                generateId('Class', `${file.path}:${enclosingClass}`);
-                const parentId = symbolTable.lookupFuzzy(mixinName)[0]?.nodeId ||
-                                 generateId('Module', `${mixinName}`);
-                if (childId && parentId) {
-                  const relId = generateId('IMPLEMENTS', `${childId}->${parentId}`);
-                  graph.addRelationship({
-                    id: relId, sourceId: childId, targetId: parentId,
-                    type: 'IMPLEMENTS', confidence: 1.0, reason: 'trait-impl',
-                  });
-                }
+          case 'heritage':
+            for (const item of routed.items) {
+              const childId = symbolTable.lookupExact(file.path, item.enclosingClass) ||
+                              symbolTable.lookupFuzzy(item.enclosingClass)[0]?.nodeId ||
+                              generateId('Class', `${file.path}:${item.enclosingClass}`);
+              const parentId = symbolTable.lookupFuzzy(item.mixinName)[0]?.nodeId ||
+                               generateId('Module', `${item.mixinName}`);
+              if (childId && parentId) {
+                const relId = generateId('IMPLEMENTS', `${childId}->${parentId}`);
+                graph.addRelationship({
+                  id: relId, sourceId: childId, targetId: parentId,
+                  type: 'IMPLEMENTS', confidence: 1.0, reason: 'trait-impl',
+                });
               }
             }
-          }
-          return;
-        }
+            return;
 
-        // attr_accessor/attr_reader/attr_writer → property definitions
-        if (calledName === 'attr_accessor' || calledName === 'attr_reader' || calledName === 'attr_writer') {
-          const argList = callNode.childForFieldName?.('arguments');
-          for (const arg of (argList?.children ?? [])) {
-            if (arg.type === 'simple_symbol') {
-              const propName = arg.text.replace(/^:/, '');
-              const nodeId = generateId('Property', `${file.path}:${propName}`);
+          case 'properties':
+            for (const item of routed.items) {
+              const nodeId = generateId('Property', `${file.path}:${item.propName}`);
               graph.addNode({
                 id: nodeId,
                 label: 'Property' as any,
                 properties: {
-                  name: propName, filePath: file.path,
-                  startLine: arg.startPosition.row, endLine: arg.endPosition.row,
-                  language: 'ruby', isExported: true,
+                  name: item.propName, filePath: file.path,
+                  startLine: item.startLine, endLine: item.endLine,
+                  language: SupportedLanguages.Ruby, isExported: true,
+                  description: item.accessorType,
                 },
               });
-              symbolTable.add(file.path, propName, nodeId, 'Property');
+              symbolTable.add(file.path, item.propName, nodeId, 'Property');
               const fileId = generateId('File', file.path);
               const relId = generateId('DEFINES', `${fileId}->${nodeId}`);
               graph.addRelationship({
@@ -264,8 +249,10 @@ export const processCalls = async (
                 type: 'DEFINES', confidence: 1.0, reason: '',
               });
             }
-          }
-          return;
+            return;
+
+          case 'call':
+            break; // fall through to normal call processing below
         }
       }
 
