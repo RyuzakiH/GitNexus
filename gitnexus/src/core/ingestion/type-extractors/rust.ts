@@ -215,10 +215,21 @@ const extractPatternBinding: PatternBindingExtractor = (
   declarationTypeNodes,
   scope,
 ) => {
-  if (node.type !== 'let_condition') return undefined;
+  let patternNode: SyntaxNode | null = null;
+  let valueNode: SyntaxNode | null = null;
 
-  const patternNode = node.childForFieldName('pattern');
-  const valueNode = node.childForFieldName('value');
+  if (node.type === 'let_condition') {
+    patternNode = node.childForFieldName('pattern');
+    valueNode = node.childForFieldName('value');
+  } else if (node.type === 'match_arm') {
+    // match_arm → pattern is in the 'pattern' field
+    // source variable is in the parent match_expression's 'value' field
+    patternNode = node.childForFieldName('pattern');
+    const matchExpr = node.parent?.parent; // match_arm → match_block → match_expression
+    if (matchExpr?.type === 'match_expression') {
+      valueNode = matchExpr.childForFieldName('value');
+    }
+  }
   if (!patternNode || !valueNode) return undefined;
 
   // Only handle tuple_struct_pattern: Some(x) or Ok(x)
@@ -370,7 +381,7 @@ const extractForLoopBinding: ForLoopExtractor = (
 export const typeConfig: LanguageTypeConfig = {
   declarationNodeTypes: DECLARATION_NODE_TYPES,
   forLoopNodeTypes: FOR_LOOP_NODE_TYPES,
-  patternBindingNodeTypes: new Set(['let_condition']),
+  patternBindingNodeTypes: new Set(['let_condition', 'match_arm']),
   extractDeclaration,
   extractInitializer,
   extractParameter,

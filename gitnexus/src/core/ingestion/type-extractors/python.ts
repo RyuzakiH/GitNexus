@@ -283,14 +283,13 @@ const extractPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv) =>
 const extractPatternBinding: PatternBindingExtractor = (node, scopeEnv) => {
   if (node.type !== 'as_pattern') return undefined;
 
-  // as_pattern children (positional, no named fields in this tree-sitter version):
-  //   child 0: case_pattern (wrapping class_pattern) or class_pattern directly
-  //   child 1: identifier (the bound variable name, e.g. "u")
-  // Note: `alias` field returns null at runtime despite node-types.json listing it.
+  // as_pattern: `case User() as u:` — binds matched value to a name.
+  // Try named field first (future grammar versions may expose it), fall back to positional.
   if (node.namedChildCount < 2) return undefined;
 
   const patternChild = node.namedChild(0);
-  const varNameNode = node.namedChild(node.namedChildCount - 1);
+  const varNameNode = node.childForFieldName('alias')
+    ?? node.namedChild(node.namedChildCount - 1);
   if (!patternChild || !varNameNode) return undefined;
   if (varNameNode.type !== 'identifier') return undefined;
 

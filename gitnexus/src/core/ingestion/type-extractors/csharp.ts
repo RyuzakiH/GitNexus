@@ -226,16 +226,30 @@ const extractForLoopBinding: ForLoopExtractor = (
  * No scopeEnv lookup is needed — the pattern explicitly declares the new variable's type.
  */
 const extractPatternBinding: PatternBindingExtractor = (node) => {
-  if (node.type !== 'is_pattern_expression') return undefined;
-  const pattern = node.childForFieldName('pattern');
-  if (pattern?.type !== 'declaration_pattern') return undefined;
-  const typeNode = pattern.childForFieldName('type');
-  const nameNode = pattern.childForFieldName('name');
-  if (!typeNode || !nameNode) return undefined;
-  const typeName = extractSimpleTypeName(typeNode);
-  const varName = extractVarName(nameNode);
-  if (!typeName || !varName) return undefined;
-  return { varName, typeName };
+  // is_pattern_expression: `obj is User user` — has a declaration_pattern child
+  if (node.type === 'is_pattern_expression') {
+    const pattern = node.childForFieldName('pattern');
+    if (pattern?.type !== 'declaration_pattern') return undefined;
+    const typeNode = pattern.childForFieldName('type');
+    const nameNode = pattern.childForFieldName('name');
+    if (!typeNode || !nameNode) return undefined;
+    const typeName = extractSimpleTypeName(typeNode);
+    const varName = extractVarName(nameNode);
+    if (!typeName || !varName) return undefined;
+    return { varName, typeName };
+  }
+  // declaration_pattern: standalone in switch statements and switch expressions
+  // `case User u:` or `User u =>` — the declaration_pattern is a direct child
+  if (node.type === 'declaration_pattern') {
+    const typeNode = node.childForFieldName('type');
+    const nameNode = node.childForFieldName('name');
+    if (!typeNode || !nameNode) return undefined;
+    const typeName = extractSimpleTypeName(typeNode);
+    const varName = extractVarName(nameNode);
+    if (!typeName || !varName) return undefined;
+    return { varName, typeName };
+  }
+  return undefined;
 };
 
 /** C#: var alias = u → variable_declarator with name + equals_value_clause.
@@ -266,7 +280,7 @@ const extractPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv) =>
 export const typeConfig: LanguageTypeConfig = {
   declarationNodeTypes: DECLARATION_NODE_TYPES,
   forLoopNodeTypes: FOR_LOOP_NODE_TYPES,
-  patternBindingNodeTypes: new Set(['is_pattern_expression']),
+  patternBindingNodeTypes: new Set(['is_pattern_expression', 'declaration_pattern']),
   extractDeclaration,
   extractParameter,
   scanConstructorBinding,

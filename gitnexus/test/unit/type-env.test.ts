@@ -2613,6 +2613,18 @@ def process():
       // for array_type), but the for-loop extractor uses AST walking to resolve the element type.
       expect(flatGet(env, 'user')).toBe('User');
     });
+
+    it('infers loop variable from readonly User[] parameter', () => {
+      const tree = parse(`
+        function process(users: readonly User[]) {
+          for (const user of users) {
+            user.save();
+          }
+        }
+      `, TypeScript.typescript);
+      const { env } = buildTypeEnv(tree, 'typescript');
+      expect(flatGet(env, 'user')).toBe('User');
+    });
   });
 
   describe('for-loop element type inference (Tier 1c) — Python', () => {
@@ -2842,6 +2854,76 @@ class Foo {
 }
       `, CSharp);
       const { env } = buildTypeEnv(tree, 'csharp');
+      expect(flatGet(env, 'user')).toBeUndefined();
+    });
+  });
+
+  describe('for-loop element type inference (Tier 1c) — Kotlin', () => {
+    it('infers loop variable from unannotated for with List<User> parameter', () => {
+      const tree = parse(`
+fun process(users: List<User>) {
+    for (user in users) {
+        user.save()
+    }
+}
+      `, Kotlin);
+      const { env } = buildTypeEnv(tree, 'kotlin');
+      expect(flatGet(env, 'user')).toBe('User');
+    });
+
+    it('still resolves explicit type annotation (regression)', () => {
+      const tree = parse(`
+fun process(users: List<User>) {
+    for (user: User in users) {
+        user.save()
+    }
+}
+      `, Kotlin);
+      const { env } = buildTypeEnv(tree, 'kotlin');
+      expect(flatGet(env, 'user')).toBe('User');
+    });
+
+    it('does not infer type when iterable has no annotation', () => {
+      const tree = parse(`
+fun process() {
+    val users = getUsers()
+    for (user in users) {
+        user.save()
+    }
+}
+      `, Kotlin);
+      const { env } = buildTypeEnv(tree, 'kotlin');
+      expect(flatGet(env, 'user')).toBeUndefined();
+    });
+  });
+
+  describe('for-loop element type inference (Tier 1c) — Java', () => {
+    it('still resolves explicit type enhanced-for (regression)', () => {
+      const tree = parse(`
+class Foo {
+  void process(List<User> users) {
+    for (User user : users) {
+      user.save();
+    }
+  }
+}
+      `, Java);
+      const { env } = buildTypeEnv(tree, 'java');
+      expect(flatGet(env, 'user')).toBe('User');
+    });
+
+    it('does not infer type when iterable has no annotation', () => {
+      const tree = parse(`
+class Foo {
+  void process() {
+    var users = getUsers();
+    for (var user : users) {
+      user.save();
+    }
+  }
+}
+      `, Java);
+      const { env } = buildTypeEnv(tree, 'java');
       expect(flatGet(env, 'user')).toBeUndefined();
     });
   });

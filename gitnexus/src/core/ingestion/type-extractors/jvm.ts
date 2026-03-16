@@ -1,6 +1,6 @@
 import type { SyntaxNode } from '../utils.js';
 import type { LanguageTypeConfig, ParameterExtractor, TypeBindingExtractor, InitializerExtractor, ClassNameLookup, ConstructorBindingScanner, ForLoopExtractor, PendingAssignmentExtractor, PatternBindingExtractor } from './types.js';
-import { extractSimpleTypeName, extractVarName, findChildByType } from './shared.js';
+import { extractSimpleTypeName, extractVarName, findChildByType, extractGenericTypeArgs, resolveIterableElementType } from './shared.js';
 
 // ── Java ──────────────────────────────────────────────────────────────────
 
@@ -89,19 +89,74 @@ const JAVA_FOR_LOOP_NODE_TYPES: ReadonlySet<string> = new Set([
   'enhanced_for_statement',
 ]);
 
-/** Java: for (User user : users) — extract loop variable binding */
+/** Extract element type from a Java type annotation AST node.
+ *  Handles generic_type (List<User>), array_type (User[]). */
+const extractJavaElementTypeFromTypeNode = (typeNode: SyntaxNode): string | undefined => {
+  if (typeNode.type === 'generic_type') {
+    const args = extractGenericTypeArgs(typeNode);
+    if (args.length >= 1) return args[0];
+  }
+  if (typeNode.type === 'array_type') {
+    const elemNode = typeNode.firstNamedChild;
+    if (elemNode) return extractSimpleTypeName(elemNode);
+  }
+  return undefined;
+};
+
+/** Walk up from a for-each to the enclosing method_declaration and search parameters. */
+const findJavaParamElementType = (iterableName: string, startNode: SyntaxNode): string | undefined => {
+  let current: SyntaxNode | null = startNode.parent;
+  while (current) {
+    if (current.type === 'method_declaration' || current.type === 'constructor_declaration') {
+      const paramsNode = current.childForFieldName('parameters');
+      if (paramsNode) {
+        for (let i = 0; i < paramsNode.namedChildCount; i++) {
+          const param = paramsNode.namedChild(i);
+          if (!param || param.type !== 'formal_parameter') continue;
+          const nameNode = param.childForFieldName('name');
+          if (nameNode?.text !== iterableName) continue;
+          const typeNode = param.childForFieldName('type');
+          if (typeNode) return extractJavaElementTypeFromTypeNode(typeNode);
+        }
+      }
+      break;
+    }
+    current = current.parent;
+  }
+  return undefined;
+};
+
+/** Java: for (User user : users) — extract loop variable binding.
+ *  Tier 1c: for `for (var user : users)`, resolves element type from iterable. */
 const extractJavaForLoopBinding: ForLoopExtractor = (
   node: SyntaxNode,
   scopeEnv: Map<string, string>,
-  _declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
-  _scope: string,
+  declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
+  scope: string,
 ): void => {
   const typeNode = node.childForFieldName('type');
   const nameNode = node.childForFieldName('name');
   if (!typeNode || !nameNode) return;
-  const typeName = extractSimpleTypeName(typeNode);
   const varName = extractVarName(nameNode);
-  if (typeName && varName) scopeEnv.set(varName, typeName);
+  if (!varName) return;
+
+  // Explicit type (existing behavior): for (User user : users)
+  const typeName = extractSimpleTypeName(typeNode);
+  if (typeName && typeName !== 'var') {
+    scopeEnv.set(varName, typeName);
+    return;
+  }
+
+  // Tier 1c: var — resolve from iterable's container type
+  const iterableNode = node.childForFieldName('value');
+  if (!iterableNode || iterableNode.type !== 'identifier') return;
+  const iterableName = iterableNode.text;
+
+  const elementType = resolveIterableElementType(
+    iterableName, node, scopeEnv, declarationTypeNodes, scope,
+    extractJavaElementTypeFromTypeNode, findJavaParamElementType,
+  );
+  if (elementType) scopeEnv.set(varName, elementType);
 };
 
 /** Java: var alias = u → local_variable_declaration > variable_declarator with name/value */
@@ -285,24 +340,92 @@ const KOTLIN_FOR_LOOP_NODE_TYPES: ReadonlySet<string> = new Set([
   'for_statement',
 ]);
 
-/** Kotlin: for (user: User in users) — extract loop variable binding when explicit type annotation exists */
+/** Extract element type from a Kotlin type annotation AST node (user_type wrapping generic).
+ *  Kotlin: user_type → [type_identifier, type_arguments → [type_projection → user_type]]
+ *  Handles the type_projection wrapper that Kotlin uses for generic type arguments. */
+const extractKotlinElementTypeFromTypeNode = (typeNode: SyntaxNode): string | undefined => {
+  if (typeNode.type === 'user_type') {
+    const argsNode = findChildByType(typeNode, 'type_arguments');
+    if (argsNode && argsNode.namedChildCount >= 1) {
+      const firstArg = argsNode.namedChild(0);
+      if (!firstArg) return undefined;
+      // Kotlin wraps type args in type_projection — unwrap to get the inner type
+      const inner = firstArg.type === 'type_projection'
+        ? firstArg.firstNamedChild
+        : firstArg;
+      if (inner) return extractSimpleTypeName(inner);
+    }
+  }
+  return undefined;
+};
+
+/** Walk up from a for-loop to the enclosing function_declaration and search parameters.
+ *  Kotlin parameters use positional children (simple_identifier, user_type), not named fields. */
+const findKotlinParamElementType = (iterableName: string, startNode: SyntaxNode): string | undefined => {
+  let current: SyntaxNode | null = startNode.parent;
+  while (current) {
+    if (current.type === 'function_declaration') {
+      const paramsNode = findChildByType(current, 'function_value_parameters');
+      if (paramsNode) {
+        for (let i = 0; i < paramsNode.namedChildCount; i++) {
+          const param = paramsNode.namedChild(i);
+          if (!param || param.type !== 'parameter') continue;
+          const nameNode = findChildByType(param, 'simple_identifier');
+          if (nameNode?.text !== iterableName) continue;
+          const typeNode = findChildByType(param, 'user_type');
+          if (typeNode) return extractKotlinElementTypeFromTypeNode(typeNode);
+        }
+      }
+      break;
+    }
+    current = current.parent;
+  }
+  return undefined;
+};
+
+/** Kotlin: for (user: User in users) — extract loop variable binding.
+ *  Tier 1c: for `for (user in users)` without annotation, resolves from iterable. */
 const extractKotlinForLoopBinding: ForLoopExtractor = (
   node: SyntaxNode,
   scopeEnv: Map<string, string>,
-  _declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
-  _scope: string,
+  declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
+  scope: string,
 ): void => {
-  // Kotlin loop variable: variable_declaration child with optional user_type annotation
   const varDecl = findChildByType(node, 'variable_declaration');
   if (!varDecl) return;
-  // Only extract when there is an explicit type annotation (user_type node)
-  const typeNode = findChildByType(varDecl, 'user_type');
-  if (!typeNode) return;
   const nameNode = findChildByType(varDecl, 'simple_identifier');
   if (!nameNode) return;
-  const typeName = extractSimpleTypeName(typeNode);
   const varName = extractVarName(nameNode);
-  if (typeName && varName) scopeEnv.set(varName, typeName);
+  if (!varName) return;
+
+  // Explicit type annotation (existing behavior): for (user: User in users)
+  const typeNode = findChildByType(varDecl, 'user_type');
+  if (typeNode) {
+    const typeName = extractSimpleTypeName(typeNode);
+    if (typeName) scopeEnv.set(varName, typeName);
+    return;
+  }
+
+  // Tier 1c: no annotation — resolve from iterable's container type
+  // Kotlin for-loop children: [variable_declaration, simple_identifier(iterable), control_structure_body]
+  // The iterable is the second named child of the for_statement (after variable_declaration)
+  let iterableName: string | undefined;
+  let foundVarDecl = false;
+  for (let i = 0; i < node.namedChildCount; i++) {
+    const child = node.namedChild(i);
+    if (child === varDecl) { foundVarDecl = true; continue; }
+    if (foundVarDecl && child?.type === 'simple_identifier') {
+      iterableName = child.text;
+      break;
+    }
+  }
+  if (!iterableName) return;
+
+  const elementType = resolveIterableElementType(
+    iterableName, node, scopeEnv, declarationTypeNodes, scope,
+    extractKotlinElementTypeFromTypeNode, findKotlinParamElementType,
+  );
+  if (elementType) scopeEnv.set(varName, elementType);
 };
 
 /** Kotlin: val alias = u → property_declaration or variable_declaration.

@@ -214,6 +214,12 @@ const extractTsElementTypeFromAnnotation = (typeAnnotation: SyntaxNode): string 
     ? (typeAnnotation.firstNamedChild ?? typeAnnotation)
     : typeAnnotation;
 
+  // readonly User[] — readonly_type wraps array_type: unwrap and recurse
+  if (inner.type === 'readonly_type') {
+    const wrapped = inner.firstNamedChild;
+    if (wrapped) return extractTsElementTypeFromAnnotation(wrapped);
+  }
+
   // User[] — array_type: first named child is the element type
   if (inner.type === 'array_type') {
     const elem = inner.firstNamedChild;
