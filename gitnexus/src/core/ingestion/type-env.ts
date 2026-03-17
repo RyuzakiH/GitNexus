@@ -387,6 +387,13 @@ export const buildTypeEnv = (
       const rawReturn = callables[0].returnType;
       if (!rawReturn) return undefined;
       return extractReturnTypeName(rawReturn);
+    },
+    lookupRawReturnType(callee: string): string | undefined {
+      if (!symbolTable) return undefined;
+      if (isBuiltInOrNoise(callee)) return undefined;
+      const callables = symbolTable.lookupFuzzyCallable(callee);
+      if (callables.length !== 1) return undefined;
+      return callables[0].returnType;
     }
   };
 

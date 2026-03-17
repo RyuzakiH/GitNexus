@@ -28,7 +28,12 @@ export type ReturnTypeExtractor = (node: SyntaxNode) => string | undefined;
  *  Backed by SymbolTable.lookupFuzzyCallable; passed via ForLoopExtractorContext.
  *  Conservative: returns undefined when the callee is ambiguous (0 or 2+ matches). */
 export interface ReturnTypeLookup {
+  /** Processed type name after stripping wrappers (e.g., 'User' from 'Promise<User>').
+   *  Use for call-result variable bindings (`const b = foo()`). */
   lookupReturnType(callee: string): string | undefined;
+  /** Raw return type as declared in the symbol (e.g., '[]User', 'List<User>').
+   *  Use for iterable-element extraction (`for v := range foo()`). */
+  lookupRawReturnType(callee: string): string | undefined;
 }
 
 /** Context object passed to ForLoopExtractor.
