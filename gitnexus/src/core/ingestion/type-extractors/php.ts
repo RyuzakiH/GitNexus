@@ -1,6 +1,6 @@
 import type { SyntaxNode } from '../utils.js';
 import type { LanguageTypeConfig, ParameterExtractor, TypeBindingExtractor, InitializerExtractor, ClassNameLookup, ConstructorBindingScanner, ReturnTypeExtractor, PendingAssignmentExtractor, ForLoopExtractor } from './types.js';
-import { extractSimpleTypeName, extractVarName, extractCalleeName, resolveIterableElementType } from './shared.js';
+import { extractSimpleTypeName, extractVarName, extractCalleeName, resolveIterableElementType, extractElementTypeFromString } from './shared.js';
 
 const DECLARATION_NODE_TYPES: ReadonlySet<string> = new Set([
   'assignment_expression',   // For constructor inference: $x = new User()
@@ -61,9 +61,15 @@ const normalizePhpType = (raw: string): string | undefined => {
   type = segments[segments.length - 1];
   // Skip uninformative types
   if (type === 'mixed' || type === 'void' || type === 'self' || type === 'static' || type === 'object') return undefined;
-  // Strip generic suffix: Collection<User> → Collection (allows container descriptor lookup)
+  // Extract element type from generic: Collection<User> → User
+  // PHPDoc generics encode the element type in angle brackets. Since PHP's Strategy B
+  // uses the scopeEnv value directly as the element type, we must store the inner type,
+  // not the container name. This mirrors how User[] → User is handled by the [] strip above.
   const genericMatch = type.match(/^(\w+)\s*</);
-  if (genericMatch) return genericMatch[1];
+  if (genericMatch) {
+    const elementType = extractElementTypeFromString(type);
+    return elementType ?? undefined;
+  }
   if (/^\w+$/.test(type)) return type;
   return undefined;
 };
@@ -360,7 +366,9 @@ const extractForLoopBinding: ForLoopExtractor = (
     iterableName = iterableNode.text;
   } else if (iterableNode?.type === 'member_access_expression') {
     const name = iterableNode.childForFieldName('name');
-    if (name) iterableName = name.text;
+    // PHP properties are stored in scopeEnv with $ prefix ($users), but
+    // member_access_expression.name returns without $ (users). Add $ to match.
+    if (name) iterableName = '$' + name.text;
   }
   if (!iterableName) return;
 
