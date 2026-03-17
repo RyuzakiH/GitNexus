@@ -128,12 +128,7 @@ const findJavaParamElementType = (iterableName: string, startNode: SyntaxNode, p
 
 /** Java: for (User user : users) — extract loop variable binding.
  *  Tier 1c: for `for (var user : users)`, resolves element type from iterable. */
-const extractJavaForLoopBinding: ForLoopExtractor = (
-  node: SyntaxNode,
-  scopeEnv: Map<string, string>,
-  declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
-  scope: string,
-): void => {
+const extractJavaForLoopBinding: ForLoopExtractor = (node,  { scopeEnv, declarationTypeNodes, scope }): void => {
   const typeNode = node.childForFieldName('type');
   const nameNode = node.childForFieldName('name');
   if (!typeNode || !nameNode) return;
@@ -193,7 +188,7 @@ const extractJavaPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv
     if (!nameNode || !valueNode) continue;
     const lhs = nameNode.text;
     if (scopeEnv.has(lhs)) continue;
-    if (valueNode.type === 'identifier' || valueNode.type === 'simple_identifier') return { lhs, rhs: valueNode.text };
+    if (valueNode.type === 'identifier' || valueNode.type === 'simple_identifier') return { kind: 'copy', lhs, rhs: valueNode.text };
   }
   return undefined;
 };
@@ -431,12 +426,8 @@ const findKotlinParamElementType = (iterableName: string, startNode: SyntaxNode,
 
 /** Kotlin: for (user: User in users) — extract loop variable binding.
  *  Tier 1c: for `for (user in users)` without annotation, resolves from iterable. */
-const extractKotlinForLoopBinding: ForLoopExtractor = (
-  node: SyntaxNode,
-  scopeEnv: Map<string, string>,
-  declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
-  scope: string,
-): void => {
+const extractKotlinForLoopBinding: ForLoopExtractor = (node, ctx): void => {
+  const { scopeEnv, declarationTypeNodes, scope } = ctx;
   const varDecl = findChildByType(node, 'variable_declaration');
   if (!varDecl) return;
   const nameNode = findChildByType(varDecl, 'simple_identifier');
@@ -537,7 +528,7 @@ const extractKotlinPendingAssignment: PendingAssignmentExtractor = (node, scopeE
       if (!child) continue;
       if (child.type === '=') { foundEq = true; continue; }
       if (foundEq && child.type === 'simple_identifier') {
-        return { lhs, rhs: child.text };
+        return { kind: 'copy', lhs, rhs: child.text };
       }
     }
     return undefined;
@@ -559,7 +550,7 @@ const extractKotlinPendingAssignment: PendingAssignmentExtractor = (node, scopeE
       if (!child) continue;
       if (child.type === '=') { foundEq = true; continue; }
       if (foundEq && child.type === 'simple_identifier') {
-        return { lhs, rhs: child.text };
+        return { kind: 'copy', lhs, rhs: child.text };
       }
     }
     return undefined;

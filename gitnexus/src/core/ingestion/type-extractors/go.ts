@@ -286,12 +286,7 @@ const findGoParamElementType = (iterableName: string, startNode: SyntaxNode, pos
  * For `_, user := range users`, the loop variable is the second identifier in
  * the `left` expression_list (index is discarded, value is the element).
  */
-const extractForLoopBinding: ForLoopExtractor = (
-  node: SyntaxNode,
-  scopeEnv: Map<string, string>,
-  declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
-  scope: string,
-): void => {
+const extractForLoopBinding: ForLoopExtractor = (node, { scopeEnv, declarationTypeNodes, scope }): void => {
   if (node.type !== 'for_statement') return;
 
   // Find the range_clause child — this distinguishes range loops from other for forms.
@@ -375,7 +370,7 @@ const extractPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv) =>
     if (lhsNode.type !== 'identifier') return undefined;
     const lhs = lhsNode.text;
     if (scopeEnv.has(lhs)) return undefined;
-    if (rhsNode.type === 'identifier') return { lhs, rhs: rhsNode.text };
+    if (rhsNode.type === 'identifier') return { kind: 'copy', lhs, rhs: rhsNode.text };
     return undefined;
   }
   if (node.type === 'var_spec' || node.type === 'var_declaration') {
@@ -400,7 +395,7 @@ const extractPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv) =>
         if (spec.child(i)?.type === 'expression_list') { exprList = spec.child(i); break; }
       }
       const rhsNode = exprList?.firstNamedChild;
-      if (rhsNode?.type === 'identifier') return { lhs, rhs: rhsNode.text };
+      if (rhsNode?.type === 'identifier') return { kind: 'copy', lhs, rhs: rhsNode.text };
     }
   }
   return undefined;

@@ -229,12 +229,7 @@ const findPyParamElementType = (iterableName: string, startNode: SyntaxNode, pos
  *   2. scopeEnv string — extractElementTypeFromString on the stored type
  *   3. AST walk — walks up to the enclosing function's parameters to read List[User] directly
  */
-const extractForLoopBinding: ForLoopExtractor = (
-  node: SyntaxNode,
-  scopeEnv: Map<string, string>,
-  declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
-  scope: string,
-): void => {
+const extractForLoopBinding: ForLoopExtractor = (node, { scopeEnv, declarationTypeNodes, scope } ): void => {
   if (node.type !== 'for_statement') return;
 
   // The iterable is the `right` field — may be identifier or call (data.items()/keys()/values()).
@@ -304,7 +299,7 @@ const extractPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv) =>
   if (!left || !right) return undefined;
   const lhs = left.type === 'identifier' ? left.text : undefined;
   if (!lhs || scopeEnv.has(lhs)) return undefined;
-  if (right.type === 'identifier') return { lhs, rhs: right.text };
+  if (right.type === 'identifier') return { kind: 'copy', lhs, rhs: right.text };
   return undefined;
 };
 

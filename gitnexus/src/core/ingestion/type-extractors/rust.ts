@@ -190,7 +190,7 @@ const extractPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv) =>
   if (!pattern || !value) return undefined;
   const lhs = extractVarName(pattern);
   if (!lhs || scopeEnv.has(lhs)) return undefined;
-  if (value.type === 'identifier') return { lhs, rhs: value.text };
+  if (value.type === 'identifier') return { kind: 'copy', lhs, rhs: value.text };
   return undefined;
 };
 
@@ -352,12 +352,7 @@ const findRustParamElementType = (iterableName: string, startNode: SyntaxNode, p
 
 /** Rust: for user in &users where users has a known container type.
  *  Unwraps reference_expression (&users, &mut users) to get the iterable name. */
-const extractForLoopBinding: ForLoopExtractor = (
-  node: SyntaxNode,
-  scopeEnv: Map<string, string>,
-  declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
-  scope: string,
-): void => {
+const extractForLoopBinding: ForLoopExtractor = (node, { scopeEnv, declarationTypeNodes, scope }): void => {
   if (node.type !== 'for_expression') return;
 
   const patternNode = node.childForFieldName('pattern');

@@ -333,12 +333,7 @@ const findTsIterableElementType = (iterableName: string, startNode: SyntaxNode, 
  *   3. AST walk — walks up to the enclosing function's parameters to read User[] annotations directly
  * Only handles `for...of`; `for...in` produces string keys, not element types.
  */
-const extractForLoopBinding: ForLoopExtractor = (
-  node: SyntaxNode,
-  scopeEnv: Map<string, string>,
-  declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
-  scope: string,
-): void => {
+const extractForLoopBinding: ForLoopExtractor = (node, { scopeEnv, declarationTypeNodes, scope }): void => {
   if (node.type !== 'for_in_statement') return;
 
   // Confirm this is `for...of`, not `for...in`, by scanning unnamed children for the keyword text.
@@ -433,7 +428,7 @@ const extractPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv) =>
     if (!nameNode || !valueNode) continue;
     const lhs = nameNode.text;
     if (scopeEnv.has(lhs)) continue;
-    if (valueNode.type === 'identifier') return { lhs, rhs: valueNode.text };
+    if (valueNode.type === 'identifier') return { kind: 'copy', lhs, rhs: valueNode.text };
   }
   return undefined;
 };

@@ -269,7 +269,7 @@ const extractPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv) =>
   const lhs = left.text;
   const rhs = right.text;
   if (!lhs || !rhs || scopeEnv.has(lhs)) return undefined;
-  return { lhs, rhs };
+  return { kind: 'copy', lhs, rhs };
 };
 
 const FOR_LOOP_NODE_TYPES: ReadonlySet<string> = new Set([
@@ -323,12 +323,7 @@ const findPhpParamElementType = (iterableName: string, startNode: SyntaxNode): s
  * constructor-binding cases that retain container types), then fall back to direct
  * scopeEnv lookup (for PHPDoc-normalized types).
  */
-const extractForLoopBinding: ForLoopExtractor = (
-  node: SyntaxNode,
-  scopeEnv: Map<string, string>,
-  declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
-  scope: string,
-): void => {
+const extractForLoopBinding: ForLoopExtractor = (node,  { scopeEnv, declarationTypeNodes, scope }): void => {
   if (node.type !== 'foreach_statement') return;
 
   // Collect non-body named children: first is the iterable, second is value or pair

@@ -191,12 +191,7 @@ const findCSharpParamElementType = (iterableName: string, startNode: SyntaxNode,
 
 /** C#: foreach (User user in users) — extract loop variable binding.
  *  Tier 1c: for `foreach (var user in users)`, resolves element type from iterable. */
-const extractForLoopBinding: ForLoopExtractor = (
-  node: SyntaxNode,
-  scopeEnv: Map<string, string>,
-  declarationTypeNodes: ReadonlyMap<string, SyntaxNode>,
-  scope: string,
-): void => {
+const extractForLoopBinding: ForLoopExtractor = (node, { scopeEnv, declarationTypeNodes, scope }): void => {
   const typeNode = node.childForFieldName('type');
   const nameNode = node.childForFieldName('left');
   if (!typeNode || !nameNode) return;
@@ -319,7 +314,7 @@ const extractPendingAssignment: PendingAssignmentExtractor = (node, scopeEnv) =>
     }
     const valueNode = evc?.firstNamedChild ?? child.namedChild(child.namedChildCount - 1);
     if (valueNode && valueNode !== nameNode && (valueNode.type === 'identifier' || valueNode.type === 'simple_identifier')) {
-      return { lhs, rhs: valueNode.text };
+      return { kind: 'copy', lhs, rhs: valueNode.text };
     }
   }
   return undefined;
