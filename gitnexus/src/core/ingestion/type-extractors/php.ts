@@ -82,6 +82,65 @@ const SKIP_NODE_TYPES: ReadonlySet<string> = new Set(['attribute_list', 'attribu
 const PHPDOC_PARAM_RE = /@param\s+(\S+)\s+\$(\w+)/g;
 /** Alternate PHPDoc order: `@param $name Type` (name first) */
 const PHPDOC_PARAM_ALT_RE = /@param\s+\$(\w+)\s+(\S+)/g;
+/** Regex to extract PHPDoc @var annotations: `@var Type` */
+const PHPDOC_VAR_RE = /@var\s+(\S+)/;
+
+/**
+ * Extract the element type for a class property from its PHPDoc @var annotation or
+ * PHP 7.4+ native type. Walks backward from the property_declaration node to find
+ * an immediately preceding comment containing @var.
+ *
+ * Returns the normalized element type (e.g. User[] → User, Collection<User> → User).
+ * Returns undefined when no usable type annotation is found.
+ */
+const extractClassPropertyElementType = (propDecl: SyntaxNode): string | undefined => {
+  // Strategy 1: PHPDoc @var annotation on a preceding comment sibling
+  let sibling = propDecl.previousSibling;
+  while (sibling) {
+    if (sibling.type === 'comment') {
+      const match = PHPDOC_VAR_RE.exec(sibling.text);
+      if (match) return normalizePhpType(match[1]);
+    } else if (sibling.isNamed && !SKIP_NODE_TYPES.has(sibling.type)) {
+      break;
+    }
+    sibling = sibling.previousSibling;
+  }
+  // Strategy 2: PHP 7.4+ native type field — skip generic 'array' since element type is unknown
+  const typeNode = propDecl.childForFieldName('type');
+  if (!typeNode) return undefined;
+  const typeName = extractSimpleTypeName(typeNode);
+  if (!typeName || typeName === 'array') return undefined;
+  return typeName;
+};
+
+/**
+ * Scan a class body for a property_declaration matching the given property name,
+ * and extract its element type. The class body is the `declaration_list` child of
+ * a `class_declaration` node.
+ *
+ * Used as Strategy C in extractForLoopBinding for `$this->property` iterables
+ * where Strategy A (resolveIterableElementType) and Strategy B (scopeEnv lookup)
+ * both fail to find the type.
+ */
+const findClassPropertyElementType = (propName: string, classNode: SyntaxNode): string | undefined => {
+  const declList = classNode.childForFieldName('body')
+    ?? classNode.namedChild(classNode.namedChildCount - 1); // fallback: last named child
+  if (!declList) return undefined;
+  for (let i = 0; i < declList.namedChildCount; i++) {
+    const child = declList.namedChild(i);
+    if (child?.type !== 'property_declaration') continue;
+    // Check if any property_element has a variable_name matching '$propName'
+    for (let j = 0; j < child.namedChildCount; j++) {
+      const elem = child.namedChild(j);
+      if (elem?.type !== 'property_element') continue;
+      const varNameNode = elem.firstNamedChild; // variable_name node
+      if (varNameNode?.text === '$' + propName) {
+        return extractClassPropertyElementType(child);
+      }
+    }
+  }
+  return undefined;
+};
 
 /**
  * Collect PHPDoc @param type bindings from comment nodes preceding a method/function.
@@ -383,6 +442,27 @@ const extractForLoopBinding: ForLoopExtractor = (node,  { scopeEnv, declarationT
   const iterableType = scopeEnv.get(iterableName);
   if (iterableType) {
     scopeEnv.set(varName, iterableType);
+    return;
+  }
+
+  // Strategy C: $this->property — scan the enclosing class body for the property
+  // declaration and extract its element type from @var PHPDoc or native type.
+  // This handles the common PHP pattern where the property type is declared on the
+  // class body (/** @var User[] */ private $users) but the foreach is in a method
+  // whose scopeEnv does not contain the property type.
+  if (iterableNode?.type === 'member_access_expression') {
+    const obj = iterableNode.childForFieldName('object');
+    if (obj?.text === '$this') {
+      const nameNode = iterableNode.childForFieldName('name');
+      const propName = nameNode?.text;
+      if (propName) {
+        const classNode = findEnclosingClass(iterableNode);
+        if (classNode) {
+          const elementType = findClassPropertyElementType(propName, classNode);
+          if (elementType) scopeEnv.set(varName, elementType);
+        }
+      }
+    }
   }
 };
 
