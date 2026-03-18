@@ -292,12 +292,12 @@ export async function startMCPServer(backend: LocalBackend): Promise<void> {
 
   // Graceful shutdown helper
   let shuttingDown = false;
-  const shutdown = async () => {
+  const shutdown = async (exitCode = 0) => {
     if (shuttingDown) return;
     shuttingDown = true;
     try { await backend.disconnect(); } catch {}
     try { await server.close(); } catch {}
-    process.exit(0);
+    process.exit(exitCode);
   };
 
   // Handle graceful shutdown
@@ -310,7 +310,7 @@ export async function startMCPServer(backend: LocalBackend): Promise<void> {
   // killing the server for one missed catch would be worse than logging it.
   process.on('uncaughtException', (err) => {
     process.stderr.write(`GitNexus MCP uncaughtException: ${err?.stack || err}\n`);
-    shutdown();
+    shutdown(1);
   });
   process.on('unhandledRejection', (reason: any) => {
     process.stderr.write(`GitNexus MCP unhandledRejection: ${reason?.stack || reason}\n`);
