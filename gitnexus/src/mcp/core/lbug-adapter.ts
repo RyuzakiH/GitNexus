@@ -217,8 +217,8 @@ export const initLbug = async (repoId: string, dbPath: string): Promise<void> =>
   shared.refCount++;
   const db = shared.db;
 
-  // Pre-create the full pool before the MCP transport is connected,
-  // so silenceStdout() during createConnection() can't race with responses.
+  // Pre-create the full pool upfront so createConnection() (which silences
+  // stdout) is never called lazily during active query execution.
   const available: lbug.Connection[] = [];
   for (let i = 0; i < MAX_CONNS_PER_REPO; i++) {
     available.push(createConnection(db));
