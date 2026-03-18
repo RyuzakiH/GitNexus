@@ -114,6 +114,25 @@ withTestLbugDB('pool-stability', (handle) => {
     expect(results).toHaveLength(8);
   });
 
+  // ─── Regression tests for #308 / #314 / #347 ──────────────────────────
+  // The impact command's enrichment phase runs 3 concurrent queries via
+  // Promise.all (local-backend.ts:1415). Before PR #349's pool pre-warming,
+  // this triggered lazy createConnection → silenceStdout → SIGSEGV.
+
+  it('3 concurrent queries via Promise.all (impact enrichment pattern, #308/#314/#347)', async () => {
+    await ensurePool();
+    // Mirrors the exact Promise.all pattern from local-backend.ts:1415
+    // that caused SIGSEGV in issues #308, #314, #347 before pool pre-warming.
+    const [r1, r2, r3] = await Promise.all([
+      executeQuery(REPO, 'MATCH (n:Function) RETURN n.name AS name LIMIT 5').catch(() => []),
+      executeQuery(REPO, 'MATCH (n:Function) RETURN n.id AS id LIMIT 5').catch(() => []),
+      executeQuery(REPO, 'MATCH ()-[r:CodeRelation]->() RETURN r.type AS type LIMIT 5').catch(() => []),
+    ]);
+    expect(r1.length).toBeGreaterThanOrEqual(1);
+    expect(r2.length).toBeGreaterThanOrEqual(1);
+    expect(r3.length).toBeGreaterThanOrEqual(1);
+  });
+
   // ─── Fresh-state tests: need their own init ──────────────────────────
 
   it('concurrent initLbug calls for the same repoId deduplicate', async () => {
