@@ -49,8 +49,6 @@ const MAX_POOL_SIZE = 5;
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 /** Max connections per repo (caps concurrent queries per repo) */
 const MAX_CONNS_PER_REPO = 8;
-/** Connections created eagerly on init */
-const INITIAL_CONNS_PER_REPO = 2;
 
 let idleTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -131,6 +129,15 @@ function restoreStdout(): void {
   }
 }
 
+// Safety watchdog: restore stdout if it gets stuck silenced (e.g. native crash
+// inside createConnection before restoreStdout runs).
+setInterval(() => {
+  if (stdoutSilenceCount > 0) {
+    stdoutSilenceCount = 0;
+    process.stdout.write = realStdoutWrite;
+  }
+}, 1000).unref();
+
 function createConnection(db: lbug.Database): lbug.Connection {
   silenceStdout();
   try {
@@ -210,9 +217,10 @@ export const initLbug = async (repoId: string, dbPath: string): Promise<void> =>
   shared.refCount++;
   const db = shared.db;
 
-  // Pre-create a small pool of connections
+  // Pre-create the full pool before the MCP transport is connected,
+  // so silenceStdout() during createConnection() can't race with responses.
   const available: lbug.Connection[] = [];
-  for (let i = 0; i < INITIAL_CONNS_PER_REPO; i++) {
+  for (let i = 0; i < MAX_CONNS_PER_REPO; i++) {
     available.push(createConnection(db));
   }
 

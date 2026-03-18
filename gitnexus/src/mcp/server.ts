@@ -276,8 +276,18 @@ Follow these steps:
 export async function startMCPServer(backend: LocalBackend): Promise<void> {
   const server = createMCPServer(backend);
 
-  // Connect to stdio transport
-  const transport = new CompatibleStdioServerTransport();
+  // Capture the real stdout.write before anything can monkey-patch it.
+  // The transport uses this proxy so MCP responses always reach the client,
+  // even if silenceStdout() is active during connection creation.
+  const _realStdoutWrite = process.stdout.write.bind(process.stdout);
+  const _safeStdout = new Proxy(process.stdout, {
+    get(target, prop, receiver) {
+      if (prop === 'write') return _realStdoutWrite;
+      const val = Reflect.get(target, prop, receiver);
+      return typeof val === 'function' ? val.bind(target) : val;
+    }
+  });
+  const transport = new CompatibleStdioServerTransport(process.stdin, _safeStdout);
   await server.connect(transport);
 
   // Graceful shutdown helper
@@ -293,6 +303,18 @@ export async function startMCPServer(backend: LocalBackend): Promise<void> {
   // Handle graceful shutdown
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  // Log crashes to stderr so they aren't silently lost.
+  // uncaughtException is fatal — shut down.
+  // unhandledRejection is logged but kept non-fatal (availability-first):
+  // killing the server for one missed catch would be worse than logging it.
+  process.on('uncaughtException', (err) => {
+    process.stderr.write(`GitNexus MCP uncaughtException: ${err?.stack || err}\n`);
+    shutdown();
+  });
+  process.on('unhandledRejection', (reason: any) => {
+    process.stderr.write(`GitNexus MCP unhandledRejection: ${reason?.stack || reason}\n`);
+  });
 
   // Handle stdio errors — stdin close means the parent process is gone
   process.stdin.on('end', shutdown);
