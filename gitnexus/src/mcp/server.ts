@@ -24,6 +24,7 @@ import {
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { GITNEXUS_TOOLS } from './tools.js';
+import { realStdoutWrite } from './core/lbug-adapter.js';
 import type { LocalBackend } from './local/local-backend.js';
 import { getResourceDefinitions, getResourceTemplates, readResource } from './resources.js';
 
@@ -276,13 +277,12 @@ Follow these steps:
 export async function startMCPServer(backend: LocalBackend): Promise<void> {
   const server = createMCPServer(backend);
 
-  // Capture the real stdout.write before anything can monkey-patch it.
-  // The transport uses this proxy so MCP responses always reach the client,
-  // even if silenceStdout() is active during connection creation.
-  const _realStdoutWrite = process.stdout.write.bind(process.stdout);
+  // Use the shared stdout reference captured at module-load time by the
+  // lbug-adapter.  Avoids divergence if anything patches stdout between
+  // module load and server start.
   const _safeStdout = new Proxy(process.stdout, {
     get(target, prop, receiver) {
-      if (prop === 'write') return _realStdoutWrite;
+      if (prop === 'write') return realStdoutWrite;
       const val = Reflect.get(target, prop, receiver);
       return typeof val === 'function' ? val.bind(target) : val;
     }
