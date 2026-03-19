@@ -46,6 +46,7 @@ function ensureHeap(): boolean {
 export interface AnalyzeOptions {
   force?: boolean;
   embeddings?: boolean;
+  ignoreEmbeddingsNodeLimit?: boolean;
   skills?: boolean;
   verbose?: boolean;
 }
@@ -267,8 +268,8 @@ export const analyzeCommand = async (
   let embeddingSkipReason = 'off (use --embeddings to enable)';
 
   if (options?.embeddings) {
-    if (stats.nodes > EMBEDDING_NODE_LIMIT) {
-      embeddingSkipReason = `skipped (${stats.nodes.toLocaleString()} nodes > ${EMBEDDING_NODE_LIMIT.toLocaleString()} limit)`;
+    if (stats.nodes > EMBEDDING_NODE_LIMIT && !options.ignoreEmbeddingsNodeLimit) {
+      embeddingSkipReason = `skipped (${stats.nodes.toLocaleString()} nodes > ${EMBEDDING_NODE_LIMIT.toLocaleString()} limit; use --ignore-embeddings-node-limit to override)`;
     } else {
       embeddingSkipped = false;
     }
